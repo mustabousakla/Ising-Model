@@ -1,0 +1,180 @@
+import matplotlib.pyplot as plt
+from numba import jit, njit
+
+#A more efficient way of computing the correlations by looping over all sites of the lattice 
+
+@jit
+def init_lattice(n):
+
+    '''Create a nxn lattice with random spin configuration'''
+    
+    lattice = np.random.choice([1, -1], size=(n, n))
+    return lattice
+
+@jit
+def deltaE(S0, Sn, J, H):
+
+    '''Energy difference for a spin flip'''
+    
+    return 2 * S0 * (H + J * Sn)
+
+@jit
+def ising(n=16, 
+          nsteps=1000000,
+          H=0,
+          J=1,
+          T=1,
+          count_spins = False,
+          countij = [1,1],
+          correlation=False,
+          corr_ij=[0,0],
+          corr_r=1):
+
+    '''Ising Model Simulator. If count_spins = True, only flipping behavior of 1 site is studied.'''
+    
+    lattice = init_lattice(n)
+    energy = 0
+    energies = []
+    spins = []
+    spin = np.sum(lattice)
+    icount, jcount = countij
+    counted_spins = [lattice[icount, jcount]]
+    counted_intervals = []
+    icorr, jcorr = corr_ij
+    Sis = []
+    SiSjs = []
+    
+    for step in range(nsteps):
+
+        i = np.random.randint(n)
+        j = np.random.randint(n)
+
+        # Periodic Boundary Condition
+        Sn = lattice[(i - 1) % n, j] + lattice[(i + 1) % n, j] + \
+             lattice[i, (j - 1) % n] + lattice[i, (j + 1) % n]
+
+        dE = deltaE(lattice[i, j], Sn, J, H)
+
+        if dE < 0 or np.random.random() < np.exp(-dE/T):
+            lattice[i, j] = -lattice[i, j]
+            energy += dE
+            energies.append(energy)
+         # Note that the spin is collected at every step
+            spin += 2*lattice[i, j]
+        
+        if count_spins:
+            ispin = lattice[icount, jcount]
+            if ispin != counted_spins[-1]:
+                counted_spins.append(ispin)
+                counted_interval = step - sum(counted_intervals)
+
+                counted_intervals.append(counted_interval)
+        if correlation:
+            Sn_corr = lattice[(icorr - corr_r) % n, jcorr] + lattice[(icorr + corr_r) % n, jcorr] + \
+                      lattice[icorr, (jcorr - corr_r) % n] + lattice[icorr, (jcorr + corr_r) % n]
+            Si = lattice[icorr, jcorr]
+            SiSj = Si * Sn_corr / 4.0
+            Sis.append(Si)
+            SiSjs.append(SiSj)
+            
+        spins.append(spin)
+
+
+    if correlation:
+        return Sis, SiSjs
+    
+    if count_spins:
+        return counted_spins, counted_intervals
+        
+    return lattice, energies, spins
+    
+
+
+print('fet1')
+
+
+n = 16 # Lattice size
+nsteps = 100000
+
+temperatures = [1, 2.269, 5]
+# Different values of the separation
+rs = np.arange(1,11, 1)
+
+Corr=[]
+for T in temperatures:
+    corr_funcs = []
+
+    for r in rs:
+        Sis, SiSjs = ising(n=n, nsteps=nsteps, correlation=True, corr_ij =[11,11], corr_r=r, T=T)
+        Si_avg = sum(Sis) / nsteps
+        SiSj_avg = sum(SiSjs) / nsteps
+        corr_func = np.abs(SiSj_avg - Si_avg ** 2)
+        corr_funcs.append(corr_func)
+    Corr.append(corr_funcs)
+    plt.plot(rs, corr_funcs, 'o-', label='T = {0}'.format(T))
+
+plt.xlabel('Spins distance', fontsize =12)
+plt.ylabel('Correlation Function', fontsize = 12)
+plt.legend()
+plt.show()
+
+print('fet2')
+print(Corr)
+
+#-----------------------------------------------------
+# Fittted correlations 
+from scipy.optimize import curve_fit
+def func(x,a,b):
+    return b*(np.e)**(-x/a)
+
+rs = np.arange(1,11, 1)
+corr=[[0.01502672159999996, 0.003906774399999868, 0.08783984639999998, 0.1998342124, 0.003298625600000049, 0.10075391000000011, 0.05533110240000001, 0.02088843159999998, 0.04391714840000005, 0.015735000000000054], [0.13587504160000008, 0.26148613439999996, 0.19904246360000002, 0.06818122559999995, 0.10430179, 0.022982560399999907, 0.09790051040000003, 0.31963927039999995, 0.004252132400000108, 0.039250999999999925], [0.2557646556, 0.0346393996, 0.0385070704, 0.0272668124, 0.0064946564, 0.0220160384, 0.024216481600000003, 0.0487069316, 0.011720689999999999, 0.0294839804]]
+rscont=np.linspace(1,10,100)
+
+popt, pcov=curve_fit(func,rs,corr[2])
+
+plt.plot(rs,corr[2])
+plt.plot(rs,func(rs, *popt), 'r-', label='exponential fit for T=5, L=16')
+plt.xlabel('Spin distance', fontsize =12)
+plt.ylabel('Correlation Function', fontsize = 12)
+plt.legend()
+plt.show()
+print(popt, pcov)
+#------------------------------------------------------------------------------------
+# For various temperatures
+n = 16 # Lattice size
+nsteps = 100000
+
+temperatures = [3,3.5,4,4.5,5]
+# Different values of the separation
+rs = np.arange(1,10, 1)
+
+Corr=[]
+for T in temperatures:
+    corr_funcs = []
+    for r in rs:
+        print('estamos en',T,'posicion',r)
+        Sis, SiSjs = ising(n=n, nsteps=nsteps, correlation=True, corr_ij =[10,10], corr_r=r, T=T)
+        Si_avg = sum(Sis) / nsteps
+        SiSj_avg = sum(SiSjs) / nsteps
+        corr_func = np.abs(SiSj_avg - Si_avg ** 2)
+        corr_funcs.append(corr_func)
+    Corr.append(corr_funcs)
+    plt.plot(rs, corr_funcs, 'o-', label='T = {0}'.format(T))
+
+plt.xlabel('Spins distance', fontsize =12)
+plt.ylabel('Correlation Function', fontsize = 12)
+plt.legend()
+plt.show()
+
+print('fet2')
+print(Corr)
+
+for i in range(len(temperatures)):
+    m,b=np.polyfit(rs,np.log(Corr[i]),1)
+    print(m,b)
+    plt.plot(rs, m*rs+b)
+    plt.plot(rs, np.log(Corr[1]))
+plt.show()
+
+
